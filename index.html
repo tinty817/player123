@@ -434,47 +434,64 @@
                 controlPanel.style.display = 'none';
                 togglePanelBtn.style.display = 'none';
 
-                const videoStream = await navigator.mediaDevices.getDisplayMedia({
-                video: { cursor: "never" },
-                audio: false,
-                preferCurrentTab: true,         // 放到外層：優先選擇當前分頁
-                selfBrowserSurface: "include"   // 放到外層：強制解鎖「允許錄製自己」的限制
-            });
+        // 1. 移除強制 1080p，讓系統以最自然、無綠條的比例錄製高幀率畫面
+        const videoStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { 
+                cursor: "never",
+                frameRate: { ideal: 60 } // 保留 60fps 的流暢度
+            },
+            audio: false,
+            preferCurrentTab: true,
+            selfBrowserSurface: "include"
+        });
 
-                const audioStream = audioElement.captureStream ? audioElement.captureStream() : audioElement.mozCaptureStream();
+        const audioStream = audioElement.captureStream ? audioElement.captureStream() : audioElement.mozCaptureStream();
 
-                const combinedStream = new MediaStream([
-                    ...videoStream.getVideoTracks(),
-                    ...audioStream.getAudioTracks()
-                ]);
+        const combinedStream = new MediaStream([
+            ...videoStream.getVideoTracks(),
+            ...audioStream.getAudioTracks()
+        ]);
 
-                mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
+    // 2. 解除封印：把影像和聲音的位元率開到瀏覽器的極限
+    const options = {
+        // 明確指定使用 VP9 (目前網頁端最高畫質影像編碼) 與 Opus (高音質音訊編碼)
+        mimeType: 'video/webm; codecs=vp9,opus', 
+        
+        // 影像位元率設定為 50 Mbps (50000000)
+        // 註：這是一個極端值，瀏覽器不一定能跑到這麼高，但這樣寫可以強迫它使用當下硬體能支援的「最大極限畫質」來錄製。
+        videoBitsPerSecond: 50000000, 
+        
+        // 音訊位元率設定為 320 kbps (320000)
+        // 註：這相當於 Spotify 的「極高音質」標準，能保留最完整的聲音細節。
+        audioBitsPerSecond: 320000    
+    };
 
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) recordedChunks.push(e.data);
-                };
+    mediaRecorder = new MediaRecorder(combinedStream, options);
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+        };
 
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
-                    const url = URL.createObjectURL(blob);
-                    
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${panelSongTitle.value || 'music_video'}.webm`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    recordedChunks = [];
+        mediaRecorder.onstop = () => {
+            // 3. 確保副檔名為最穩定的 .webm
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${panelSongTitle.value || 'music_video'}.webm`;
+            a.click();
+            URL.revokeObjectURL(url);
+            recordedChunks = [];
 
-                    videoStream.getTracks().forEach(track => track.stop());
+            videoStream.getTracks().forEach(track => track.stop());
 
-                    // 錄影結束：恢復面板、開關與游標
-                    controlPanel.style.display = 'flex';
-                    togglePanelBtn.style.display = 'flex';
-                    togglePanelBtn.classList.remove('collapsed'); // 確保面板出來時箭頭方向正確
-                    document.body.classList.remove('recording');
-                    recordBtn.textContent = '🎬 一鍵錄製成影片 (Export)';
-                    recordBtn.style.backgroundColor = '#4A7282';
-                };
+            controlPanel.style.display = 'flex';
+            togglePanelBtn.style.display = 'flex';
+            togglePanelBtn.classList.remove('collapsed');
+            document.body.classList.remove('recording');
+            recordBtn.textContent = '🎬 一鍵錄製成影片 (Export)';
+            recordBtn.style.backgroundColor = '#4A7282';
+        };
 
                 audioElement.currentTime = 0;
                 audioElement.play();
