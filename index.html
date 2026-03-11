@@ -435,9 +435,11 @@
                 togglePanelBtn.style.display = 'none';
 
                 const videoStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { preferCurrentTab: true, cursor: "never" },
-                    audio: false
-                });
+                video: { cursor: "never" },
+                audio: false,
+                preferCurrentTab: true,         // 放到外層：優先選擇當前分頁
+                selfBrowserSurface: "include"   // 放到外層：強制解鎖「允許錄製自己」的限制
+            });
 
                 const audioStream = audioElement.captureStream ? audioElement.captureStream() : audioElement.mozCaptureStream();
 
@@ -505,5 +507,4 @@
         });
     </script>
 </body>
-
 </html>
