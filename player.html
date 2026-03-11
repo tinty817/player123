@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>動態音樂播放器 - 製作工具</title>
+    <style>
+        :root { --bg-color: #4A7282; }
+
+        body {
+            margin: 0; padding: 0;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            display: flex; height: 100vh; width: 100vw; overflow: hidden;
+        }
+
+        /* --- 錄影專用：強制隱藏整個網頁的滑鼠游標 --- */
+        body.recording, body.recording * {
+            cursor: none !important;
+        }
+
+        /* --- 新增：右上角小箭頭按鈕 --- */
+        .toggle-panel-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px; /* 定位在右上角 */
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.25); /* 深色半透明，適應任何背景 */
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        .toggle-panel-btn:hover {
+            background: rgba(0, 0, 0, 0.4);
+            transform: scale(1.1);
+        }
+        .toggle-panel-btn svg {
+            fill: white;
+            width: 20px;
+            height: 20px;
+            transition: transform 0.3s ease;
+        }
+        /* 面板收起時，箭頭旋轉 180 度變成向左 */
+        .toggle-panel-btn.collapsed svg {
+            transform: rotate(180deg);
+        }
+
+        /* --- 左邊：預覽區 --- */
+        .left-panel {
+            flex: 1;
+            background-color: var(--bg-color);
+            transition: background-color 0.8s ease;
+            display: flex; align-items: center; justify-content: center;
+            position: relative;
+        }
+
+        /* --- 右邊：控制面板 --- */
+        .right-panel {
+            flex: 1;
+            background-color: #ffffff; color: #333;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            box-shadow: -10px 0 30px rgba(0,0,0,0.05); z-index: 10;
+        }
+
+        .player-wrapper { width: 350px; text-align: center; color: white; }
+        
+        .editable-text {
+            background: transparent; border: none; color: white; text-align: center;
+            font-family: inherit; outline: none; width: 100%;
+        }
+        .editable-text::placeholder { color: rgba(255, 255, 255, 0.5); }
+        .song-title { font-size: 20px; font-weight: normal; margin: 0 0 5px 0; }
+        .artist-name { font-size: 14px; opacity: 0.8; margin: 0; }
+
+        .cover-mask {
+            width: 300px; height: 300px; border-radius: 24px; margin: 30px auto;
+            background-color: rgba(255, 255, 255, 0.1); box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            overflow: hidden; display: flex; align-items: center; justify-content: center;
+        }
+        .cover-image { transform-origin: center; transition: transform 0.05s ease-out; }
+
+        .progress-area { margin-bottom: 20px; }
+        .progress-container {
+            width: 100%; height: 3px; background: rgba(255, 255, 255, 0.3);
+            border-radius: 2px; margin: 10px 0; cursor: pointer; position: relative;
+        }
+        .progress-bar { height: 100%; background: white; width: 0%; border-radius: 2px; transition: width 0.1s linear; }
+        .progress-dot {
+            position: absolute; top: 50%; left: 0%; transform: translate(-50%, -50%);
+            width: 8px; height: 8px; background: white; border-radius: 50%; transition: left 0.1s linear;
+        }
+        .time-info { display: flex; justify-content: space-between; font-size: 12px; opacity: 0.7; margin-top: 8px; }
+
+        .controls-row {
+            display: grid; grid-template-columns: 1fr max-content 1fr; 
+            width: 100%; align-items: center; margin-top: 15px;
+        }
+        .left-controls { display: flex; justify-content: flex-end; padding-right: 30px; }
+        .right-controls { display: flex; justify-content: flex-start; gap: 24px; padding-left: 30px; }
+
+        button.player-btn { background: none; border: none; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; transition: transform 0.1s; }
+        button.player-btn:active { transform: scale(0.9); }
+        .icon-btn svg { fill: white; width: 24px; height: 24px; opacity: 0.9; }
+        .play-btn svg { fill: white; width: 44px; height: 44px; }
+        .dynamic-color { fill: var(--bg-color); transition: fill 0.8s ease; }
+
+        .volume-control { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 25px; opacity: 0.6; transition: opacity 0.2s; }
+        .volume-control:hover { opacity: 1; }
+        .volume-btn svg { width: 20px; height: 20px; fill: white; }
+        .volume-slider { -webkit-appearance: none; width: 100px; height: 3px; background: rgba(255, 255, 255, 0.3); border-radius: 2px; outline: none; cursor: pointer; }
+        .volume-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%; background: white; cursor: pointer; }
+
+        /* --- 右側面板 --- */
+        .settings-container { width: 70%; max-width: 400px; max-height: 90vh; overflow-y: auto; padding-right: 10px; }
+        .settings-container::-webkit-scrollbar { width: 0px; }
+        .settings-container h2 { font-size: 24px; color: #1a1a1a; margin-bottom: 25px; font-weight: 600; }
+        .form-group { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #eee; }
+        .form-group:last-child { border-bottom: none; }
+        .form-group > label { display: block; font-size: 14px; color: #666; margin-bottom: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+
+        .panel-input { width: 100%; padding: 12px 16px; font-size: 16px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-family: inherit; }
+        .panel-input:focus { border-color: #4A7282; outline: none; }
+        input[type="file"] { display: none; }
+
+        .upload-btn {
+            display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 12px;
+            background-color: #f8f9fa; border: 2px dashed #cbd5e1; border-radius: 12px; color: #475569; font-size: 14px; cursor: pointer; transition: all 0.2s ease; box-sizing: border-box;
+        }
+        .upload-btn:hover { background-color: #f1f5f9; border-color: #94a3b8; color: #1e293b; }
+        .upload-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+        .slider-row { margin-bottom: 16px; }
+        .slider-row:last-child { margin-bottom: 0; }
+        .slider-header { display: flex; justify-content: space-between; font-size: 13px; color: #444; margin-bottom: 8px; }
+        .slider-val { font-weight: 600; color: #4A7282; font-variant-numeric: tabular-nums; }
+        .panel-slider { -webkit-appearance: none; width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px; outline: none; }
+        .panel-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #4A7282; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+
+        .toggle-row { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: #444; margin-bottom: 10px; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .3s; border-radius: 24px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .switch input:checked + .toggle-slider { background-color: #4A7282; }
+        .switch input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+        .player-wrapper .editable-text { pointer-events: none; }
+
+        .export-btn {
+            background-color: #4A7282; color: white; border: none; border-radius: 12px;
+            padding: 16px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%;
+            display: flex; align-items: center; justify-content: center; gap: 10px; transition: background-color 0.2s;
+        }
+        .export-btn:hover { background-color: #3a5a68; }
+        .export-btn:disabled { background-color: #ccc; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+    <button id="togglePanelBtn" class="toggle-panel-btn">
+        <svg viewBox="0 0 24 24">
+            <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
+        </svg>
+    </button>
+
+    <div class="left-panel" id="previewArea">
+        <div class="player-wrapper">
+            <div class="header">
+                <input type="text" id="songTitle" class="editable-text song-title" value="" placeholder="歌曲名稱" readonly>
+                <input type="text" id="artistName" class="editable-text artist-name" value="" placeholder="歌手名字" readonly>
+            </div>
+            
+            <div class="cover-mask">
+                <img id="coverImg" class="cover-image" crossorigin="anonymous" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="專輯封面">
+            </div>
+
+            <div class="progress-area">
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar" id="progressBar"></div>
+                    <div class="progress-dot" id="progressDot"></div>
+                </div>
+                <div class="time-info">
+                    <span id="currentTime">00:00</span>
+                    <span id="duration">- 00:00</span>
+                </div>
+            </div>
+
+            <div class="controls-row">
+                <div class="left-controls">
+                    <button class="player-btn icon-btn"><svg viewBox="0 0 24 24"><path d="M11.5 12l8.5 6V6l-8.5 6zM2 12l8.5 6V6L2 12z"/></svg></button>
+                </div>
+                
+                <button class="player-btn play-btn" id="playBtn">
+                    <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5.14v13.72a2 2 0 003.05 1.7l10.28-6.86a2 2 0 000-3.4L11.05 3.44A2 2 0 008 5.14z"/></svg>
+                    <svg id="pauseIcon" viewBox="0 0 24 24" style="display: none;"><rect x="6" y="5" width="4" height="14" rx="2"/><rect x="14" y="5" width="4" height="14" rx="2"/></svg>
+                </button>
+                
+                <div class="right-controls">
+                    <button class="player-btn icon-btn"><svg viewBox="0 0 24 24"><path d="M12.5 12L4 6v12l8.5-6zM22 12l-8.5-6v12l8.5-6z"/></svg></button>
+                    <button class="player-btn icon-btn">
+                        <svg viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="9" fill="white"/>
+                            <circle cx="8" cy="12" r="1.5" class="dynamic-color"/>
+                            <circle cx="12" cy="12" r="1.5" class="dynamic-color"/>
+                            <circle cx="16" cy="12" r="1.5" class="dynamic-color"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="volume-control" id="volumeControlArea">
+                <button class="player-btn volume-btn" id="muteBtn">
+                    <svg id="volIcon" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                    <svg id="muteIcon" viewBox="0 0 24 24" style="display: none;"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.11-.31 2.12-.84 3-1.46l1.97 1.97 1.27-1.27L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                </button>
+                <input type="range" id="volumeSlider" class="volume-slider" min="0" max="1" step="0.01" value="1">
+            </div>
+        </div>
+    </div>
+
+    <div class="right-panel" id="controlPanel">
+        <div class="settings-container">
+            <h2>Player Settings</h2>
+            
+            <div class="form-group">
+                <label>Text Info 文字資訊</label>
+                <input type="text" id="panelSongTitle" class="panel-input" value="" placeholder="輸入歌曲名稱" style="margin-bottom: 10px;">
+                <input type="text" id="panelArtistName" class="panel-input" value="" placeholder="輸入歌手名字">
+            </div>
+
+            <div class="form-group">
+                <label>Display 顯示設定</label>
+                <div class="toggle-row">
+                    <span>顯示音量控制 (Show Volume)</span>
+                    <label class="switch">
+                        <input type="checkbox" id="toggleVolume" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Media Files 檔案上傳</label>
+                <label class="upload-btn" style="margin-bottom: 10px;">
+                    <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    上傳封面圖片 (Image)
+                    <input type="file" id="imageUpload" accept="image/*">
+                </label>
+                <label class="upload-btn">
+                    <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                    上傳音樂檔案 (Audio)
+                    <input type="file" id="audioUpload" accept="audio/*">
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label>Image Transform 圖片微調</label>
+                <div class="slider-row">
+                    <div class="slider-header"><span>大小縮放 (Scale)</span><span class="slider-val" id="scaleVal">1.00x</span></div>
+                    <input type="range" id="scaleSlider" class="panel-slider" min="0.1" max="5" step="0.01" value="1">
+                </div>
+                <div class="slider-row">
+                    <div class="slider-header"><span>左右位置 (Position X)</span><span class="slider-val" id="posXVal">0px</span></div>
+                    <input type="range" id="posXSlider" class="panel-slider" min="-200" max="200" step="1" value="0">
+                </div>
+                <div class="slider-row">
+                    <div class="slider-header"><span>上下位置 (Position Y)</span><span class="slider-val" id="posYVal">0px</span></div>
+                    <input type="range" id="posYSlider" class="panel-slider" min="-200" max="200" step="1" value="0">
+                </div>
+            </div>
+
+            <button id="recordBtn" class="export-btn">
+                🎬 一鍵錄製成影片 (Export)
+            </button>
+
+        </div>
+    </div>
+
+    <audio id="audioElement"></audio>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const audioUpload = document.getElementById('audioUpload');
+        const coverImg = document.getElementById('coverImg');
+        const audioElement = document.getElementById('audioElement');
+        const playBtn = document.getElementById('playBtn');
+        const playIcon = document.getElementById('playIcon');
+        const pauseIcon = document.getElementById('pauseIcon');
+        const progressBar = document.getElementById('progressBar');
+        const progressDot = document.getElementById('progressDot');
+        const currentTimeEl = document.getElementById('currentTime');
+        const durationEl = document.getElementById('duration');
+        const progressContainer = document.getElementById('progressContainer');
+        const muteBtn = document.getElementById('muteBtn');
+        const volIcon = document.getElementById('volIcon');
+        const muteIcon = document.getElementById('muteIcon');
+        const volumeSlider = document.getElementById('volumeSlider');
+        const volumeControlArea = document.getElementById('volumeControlArea');
+        const toggleVolume = document.getElementById('toggleVolume');
+        const songTitle = document.getElementById('songTitle');
+        const artistName = document.getElementById('artistName');
+        const panelSongTitle = document.getElementById('panelSongTitle');
+        const panelArtistName = document.getElementById('panelArtistName');
+        const scaleSlider = document.getElementById('scaleSlider');
+        const posXSlider = document.getElementById('posXSlider');
+        const posYSlider = document.getElementById('posYSlider');
+        const scaleVal = document.getElementById('scaleVal');
+        const posXVal = document.getElementById('posXVal');
+        const posYVal = document.getElementById('posYVal');
+        const recordBtn = document.getElementById('recordBtn');
+        const controlPanel = document.getElementById('controlPanel');
+        const togglePanelBtn = document.getElementById('togglePanelBtn');
+        
+        // --- 控制面板箭頭開關邏輯 ---
+        togglePanelBtn.addEventListener('click', () => {
+            if (controlPanel.style.display === 'none') {
+                controlPanel.style.display = 'flex';
+                togglePanelBtn.classList.remove('collapsed'); // 箭頭轉向右
+            } else {
+                controlPanel.style.display = 'none';
+                togglePanelBtn.classList.add('collapsed');    // 箭頭轉向左
+            }
+        });
+
+        let isPlaying = false;
+        let mediaRecorder;
+        let recordedChunks = [];
+
+        panelSongTitle.addEventListener('input', (e) => songTitle.value = e.target.value);
+        panelArtistName.addEventListener('input', (e) => artistName.value = e.target.value);
+        toggleVolume.addEventListener('change', function() { volumeControlArea.style.display = this.checked ? 'flex' : 'none'; });
+
+        function updateImageTransform() {
+            const scale = scaleSlider.value; const x = posXSlider.value; const y = posYSlider.value;
+            coverImg.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+            scaleVal.textContent = `${Number(scale).toFixed(2)}x`; posXVal.textContent = `${x}px`; posYVal.textContent = `${y}px`;
+        }
+        scaleSlider.addEventListener('input', updateImageTransform);
+        posXSlider.addEventListener('input', updateImageTransform);
+        posYSlider.addEventListener('input', updateImageTransform);
+
+        imageUpload.addEventListener('change', function(e) {
+            if (e.target.files[0]) {
+                coverImg.src = URL.createObjectURL(e.target.files[0]);
+                scaleSlider.value = 1; posXSlider.value = 0; posYSlider.value = 0; updateImageTransform();
+            }
+        });
+
+        coverImg.addEventListener('load', function() {
+            if(coverImg.src.includes('data:image/gif')) return; 
+            const ratio = coverImg.naturalWidth / coverImg.naturalHeight;
+            if (ratio > 1) { coverImg.style.width = 'auto'; coverImg.style.height = '100%'; } 
+            else { coverImg.style.width = '100%'; coverImg.style.height = 'auto'; }
+
+            const canvas = document.createElement('canvas'); const context = canvas.getContext('2d', { willReadFrequently: true });
+            canvas.width = 1; canvas.height = 1; context.drawImage(coverImg, 0, 0, 1, 1);
+            try { const p = context.getImageData(0, 0, 1, 1).data; document.documentElement.style.setProperty('--bg-color', `rgb(${p[0]}, ${p[1]}, ${p[2]})`); } catch (error) {}
+        });
+
+        audioUpload.addEventListener('change', function(e) {
+            if (e.target.files[0]) {
+                audioElement.src = URL.createObjectURL(e.target.files[0]);
+                audioElement.onloadedmetadata = function() { durationEl.textContent = "- " + formatTime(audioElement.duration); };
+            }
+        });
+
+        playBtn.addEventListener('click', togglePlay);
+
+        function togglePlay() {
+            if (!audioElement.src) { alert("請先上傳音樂檔案喔！"); return; }
+            if (isPlaying) { audioElement.pause(); playIcon.style.display = 'block'; pauseIcon.style.display = 'none'; } 
+            else { audioElement.play(); playIcon.style.display = 'none'; pauseIcon.style.display = 'block'; }
+            isPlaying = !isPlaying;
+        }
+
+        audioElement.addEventListener('timeupdate', function() {
+            const current = audioElement.currentTime; const duration = audioElement.duration;
+            currentTimeEl.textContent = formatTime(current); durationEl.textContent = "- " + formatTime(duration - current);
+            if (duration) { const p = (current / duration) * 100; progressBar.style.width = p + '%'; progressDot.style.left = p + '%'; }
+        });
+
+        progressContainer.addEventListener('click', function(e) {
+            if (audioElement.duration) audioElement.currentTime = (e.offsetX / this.clientWidth) * audioElement.duration;
+        });
+
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return "00:00";
+            const min = Math.floor(seconds / 60); const sec = Math.floor(seconds % 60);
+            return (min < 10 ? "0" + min : min) + ":" + (sec < 10 ? "0" + sec : sec);
+        }
+
+        volumeSlider.addEventListener('input', function(e) {
+            audioElement.volume = e.target.value;
+            updateVolumeIcon(audioElement.volume);
+        });
+
+        muteBtn.addEventListener('click', function() {
+            if (audioElement.volume > 0) {
+                audioElement.dataset.lastVolume = audioElement.volume;
+                audioElement.volume = 0;
+                volumeSlider.value = 0;
+            } else {
+                const restoreVolume = audioElement.dataset.lastVolume || 1;
+                audioElement.volume = restoreVolume;
+                volumeSlider.value = restoreVolume;
+            }
+            updateVolumeIcon(audioElement.volume);
+        });
+
+        function updateVolumeIcon(vol) {
+            if (vol == 0) {
+                volIcon.style.display = 'none';
+                muteIcon.style.display = 'block';
+            } else {
+                volIcon.style.display = 'block';
+                muteIcon.style.display = 'none';
+            }
+        }
+
+        recordBtn.addEventListener('click', async () => {
+            if (!audioElement.src) {
+                alert("請先上傳一首音樂才能錄製影片喔！");
+                return;
+            }
+
+            try {
+                // 錄影前隱藏所有面板與開關
+                controlPanel.style.display = 'none';
+                togglePanelBtn.style.display = 'none';
+
+                const videoStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { preferCurrentTab: true, cursor: "never" },
+                    audio: false
+                });
+
+                const audioStream = audioElement.captureStream ? audioElement.captureStream() : audioElement.mozCaptureStream();
+
+                const combinedStream = new MediaStream([
+                    ...videoStream.getVideoTracks(),
+                    ...audioStream.getAudioTracks()
+                ]);
+
+                mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) recordedChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${panelSongTitle.value || 'music_video'}.webm`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    recordedChunks = [];
+
+                    videoStream.getTracks().forEach(track => track.stop());
+
+                    // 錄影結束：恢復面板、開關與游標
+                    controlPanel.style.display = 'flex';
+                    togglePanelBtn.style.display = 'flex';
+                    togglePanelBtn.classList.remove('collapsed'); // 確保面板出來時箭頭方向正確
+                    document.body.classList.remove('recording');
+                    recordBtn.textContent = '🎬 一鍵錄製成影片 (Export)';
+                    recordBtn.style.backgroundColor = '#4A7282';
+                };
+
+                audioElement.currentTime = 0;
+                audioElement.play();
+                playIcon.style.display = 'none';
+                pauseIcon.style.display = 'block';
+                isPlaying = true;
+
+                mediaRecorder.start();
+                
+                document.body.classList.add('recording');
+                
+                recordBtn.textContent = '🔴 錄製中... (音樂播完將自動存檔)';
+                recordBtn.style.backgroundColor = '#e63946';
+
+                audioElement.onended = () => {
+                    mediaRecorder.stop();
+                    isPlaying = false;
+                    playIcon.style.display = 'block';
+                    pauseIcon.style.display = 'none';
+                };
+
+            } catch (err) {
+                console.error("錄影取消或失敗:", err);
+                controlPanel.style.display = 'flex';
+                togglePanelBtn.style.display = 'flex';
+                togglePanelBtn.classList.remove('collapsed');
+                document.body.classList.remove('recording');
+                alert("錄影已取消。");
+            }
+        });
+    </script>
+</body>
+</html>
